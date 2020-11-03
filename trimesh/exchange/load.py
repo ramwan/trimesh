@@ -448,7 +448,8 @@ def load_kwargs(*args, **kwargs):
     # order is important
     handlers = (
         (handle_scene, ('geometry',)),
-        (handle_mesh, ('vertices', 'faces')),
+        (handle_mesh, ('vertices', 'faces', 'face_colors')),
+        (handle_mesh, ('vertices', 'faces',)),
         (handle_path, ('entities', 'vertices')),
         (handle_pointcloud, ('vertices',)),
         (handle_export, ('file_type', 'data')))

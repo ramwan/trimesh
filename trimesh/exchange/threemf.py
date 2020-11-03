@@ -2,6 +2,7 @@ import collections
 import numpy as np
 
 from .. import util
+from .. import visual
 from .. import graph
 
 from ..constants import log
@@ -43,12 +44,16 @@ def load_3MF(file_obj,
         # the default units, defined by the specification
         metadata = {'units': 'millimeters'}
 
+    # { colour id : colour hex }
+    colour_ids = {}
     # { mesh id : mesh name}
     id_name = {}
     # { mesh id: (n,3) float vertices}
     v_seq = {}
     # { mesh id: (n,3) int faces}
     f_seq = {}
+    # { mesh id: (n,3) int face colours}
+    c_seq = {}
     # components are objects that contain other objects
     # {id : [other ids]}
     components = collections.defaultdict(list)
@@ -56,10 +61,21 @@ def load_3MF(file_obj,
     # each instance is a single geometry
     build_items = []
 
+    model.seek(0)
+    for event, obj in etree.iterparse(model,\
+                                      tag=('{*}resources')):
+        # parse colours
+        if 'resources' in obj.tag:
+            for elem in obj.iter('{*}colorgroup'):
+                for colour in elem.iter('{*}color'):
+                    colour_ids[ int(elem.attrib['id']) ] = \
+                        colour.attrib['color'][1:]
+
     # iterate the XML object and build elements with an LXML iterator
     # loaded elements are cleared to avoid ballooning memory
     model.seek(0)
-    for event, obj in etree.iterparse(model, tag=('{*}object', '{*}build')):
+    for event, obj in etree.iterparse(model,\
+                                      tag=('{*}object', '{*}build')):
         # parse objects
         if 'object' in obj.tag:
             # id is mandatory
@@ -83,13 +99,26 @@ def load_3MF(file_obj,
                                         dtype=np.float64)
                 vertices.clear()
                 vertices.getparent().remove(vertices)
-
                 faces = mesh.find('{*}triangles')
-                f_seq[index] = np.array([[i.attrib['v1'],
-                                          i.attrib['v2'],
-                                          i.attrib['v3']] for
-                                         i in faces.iter('{*}triangle')],
-                                        dtype=np.int64)
+
+                tmpvertices = []
+                facecolours = []
+                hexcolor = 0
+                for i in faces.iter('{*}triangle'):
+                    tmpvertices.append([ i.attrib['v1'],\
+                                         i.attrib['v2'],\
+                                         i.attrib['v3']])
+                    if 'pid' in i.attrib:
+                        hexcolour = int(colour_ids[ int(i.attrib['pid']) ], 16)
+                        facecolours.append(( (hexcolour >> 16) & 0xFF,\
+                                             (hexcolour >> 8)  & 0xFF,\
+                                             (hexcolour)       & 0xFF) ) 
+                    else:
+                        facecolours.append( (0, 0, 0) )
+
+                f_seq[index] = np.array(tmpvertices, dtype=np.int64)
+                c_seq[index] = facecolours
+
                 faces.clear()
                 faces.getparent().remove(faces)
 
@@ -120,6 +149,7 @@ def load_3MF(file_obj,
         name = id_name[gid]
         meshes[name] = {'vertices': v_seq[gid],
                         'faces': f_seq[gid],
+                        'face_colors': c_seq[gid],
                         'metadata': metadata.copy()}
 
     # turn the item / component representation into
@@ -224,7 +254,6 @@ def _attrib_to_transform(attrib):
             dtype=np.float64).reshape((4, 3)).T
         transform[:3, :4] = values
     return transform
-
 
 # do import here to keep lxml a soft dependency
 try:
